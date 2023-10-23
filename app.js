@@ -1,4 +1,6 @@
 require('dotenv').config()
+const fs = require('fs')
+const axios = require('axios')
 const { User } = require('./models')
 const ErrorHandler = require('./middlewares/ErrorHandler')
 const cors = require('cors')
@@ -51,6 +53,55 @@ app.post('/login', async (req, res, next) => {
 })
 
 app.use(require('./middlewares/Authentication'))
+
+app.get('/movies/trending', async (req, res, next) => {
+  try {
+    // movies_trending.json refreshes every 24 hours, whenever someone hit this endpoint
+    if (fs.existsSync('./storage/movies_trending.json')) {
+      const moviesParsed = JSON.parse(fs.readFileSync('./storage/movies_trending.json', 'utf-8'))
+      const lastUpdate = new Date(moviesParsed.lastUpdate)
+      const now = new Date()
+      const diff = (now - lastUpdate) / 1000
+      if (diff < 86400) {
+        console.log('data retrieved from cache');
+        res.status(200).json(moviesParsed)
+      } else {
+        const movies = await axios.get(`https://api.themoviedb.org/3/trending/movie/day?language=en-US&api_key=${process.env.TMDB_API_KEY}`)
+        movies.data.lastUpdate = new Date()
+        fs.writeFileSync('./storage/movies_trending.json', JSON.stringify(movies.data))
+        console.log('data retrieved from API');
+        res.status(200).json(movies.data)
+      }
+    }
+  } catch (err) {
+    next(err)
+  }
+})
+
+app.get('/movies/detail/:id', async (req, res, next) => {
+  try {
+    const { id } = req.params
+    // tries to search from storage first
+    if (fs.existsSync('./storage/movies_trending.json')) {
+      const moviesParsed = JSON.parse(fs.readFileSync('./storage/movies_trending.json', 'utf-8'))
+      const movie = moviesParsed.results.find(movie => movie.id == id)
+      if (movie) {
+        console.log('data retrieved from cache');
+        res.status(200).json(movie)
+      } else {
+        const movieDetail = await axios.get(`https://api.themoviedb.org/3/movie/${id}?api_key=${process.env.TMDB_API_KEY}&language=en-US`)
+        console.log('data retrieved from API');
+        res.status(200).json(movieDetail.data)
+      }
+    } else {
+      const movieDetail = await axios.get(`https://api.themoviedb.org/3/movie/${id}?api_key=${process.env.TMDB_API_KEY}&language=en-US`)
+      console.log('data retrieved from API');
+      res.status(200).json(movieDetail.data)
+    }
+  } catch (err) {
+    next(err)
+  }
+})
 
 app.get('/test', (req, res, next) => {
   res.status(200).json({ message: 'Hello World' })
